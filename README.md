@@ -10,6 +10,8 @@
 
 **[下载安卓内容迁移 APK](https://github.com/guiii007/content-mover/releases/download/v1.3.1/ContentMover-Android.apk)**（安卓 8.0 及以上）。Tailscale 是单独的远程连接工具，不是内容迁移 App。
 
+远程连接需要的第三方工具：[Tailscale 安卓 1.104.1 安装包镜像](https://github.com/guiii007/content-mover/releases/download/v1.3.1/tailscale-android-universal-1.104.1.apk)。**Tailscale 由 Tailscale Inc. 及其贡献者开发，非本项目原创；这里只提供未修改的官方安装包镜像。** 来源、校验值和版权许可见[第三方软件说明](third-party/tailscale/README.md)。
+
 ![内容迁移图标](assets/content-mover.png)
 
 ## 使用
