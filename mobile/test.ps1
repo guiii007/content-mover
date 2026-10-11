@@ -1,10 +1,16 @@
-param([string]$ReceiverExecutable="手机接收.exe")
+param([string]$ReceiverExecutable="手机接收.exe",[switch]$Integrated)
 $ErrorActionPreference='Stop'
 $rootPath=Split-Path -Parent $PSScriptRoot
 $fixture=Join-Path $rootPath ('test-results\mobile-'+[Guid]::NewGuid().ToString('N'))
-$test=Start-Process -FilePath (Join-Path $rootPath $ReceiverExecutable) -ArgumentList @('--self-test',('"'+$fixture+'"')) -Wait -WindowStyle Hidden -PassThru
+$testArgument=if($Integrated){'--mobile-test'}else{'--self-test'}
+$test=Start-Process -FilePath (Join-Path $rootPath $ReceiverExecutable) -ArgumentList @($testArgument,('"'+$fixture+'"')) -Wait -WindowStyle Hidden -PassThru
 if($test.ExitCode -ne 0){throw '接收端测试失败'}
 Get-Content -LiteralPath (Join-Path $fixture 'mobile-test.txt')
+if($Integrated){
+  $lifecycle=Start-Process -FilePath (Join-Path $rootPath $ReceiverExecutable) -ArgumentList @('--mobile-lifecycle-test',('"'+(Join-Path $fixture 'lifecycle')+'"')) -Wait -WindowStyle Hidden -PassThru
+  if($lifecycle.ExitCode -ne 0){throw '整合接收生命周期测试失败'}
+  Get-Content -LiteralPath (Join-Path $fixture 'lifecycle\lifecycle-test.txt')
+}
 $jdk=(Get-ChildItem (Join-Path $PSScriptRoot 'toolchain\jdk') -Directory | Select-Object -First 1).FullName
 $platform=(Get-ChildItem (Join-Path $PSScriptRoot 'toolchain\platform') -Directory | Select-Object -First 1).FullName
 $classes=Join-Path $fixture 'java'

@@ -12,7 +12,7 @@ using System.Web.Script.Serialization;
 using System.Windows.Automation;
 using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyProduct("内容迁移")]
-[assembly: System.Reflection.AssemblyVersion("1.3.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.3.1.0")]
 
 namespace ContentMover {
     static class AppIcon {
@@ -666,6 +666,8 @@ namespace ContentMover {
         public Action<string> TestError;
         static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
         public static readonly uint SettingsMessage = Native.RegisterWindowMessage("ContentMover.ShowSettings.v2");
+        public static readonly uint PhoneMessage = Native.RegisterWindowMessage("ContentMover.ShowPhone.v1");
+        PairingForm phone;
         public Controller(Settings config, bool testMode) {
             settings = config; TestMode = testMode; ShowInTaskbar = false; Opacity = 0; Size = new Size(1, 1);
             Text = "内容迁移后台服务";
@@ -675,7 +677,7 @@ namespace ContentMover {
             var menu = new ContextMenuStrip();
             menu.Items.Add("打开摘录文件", null, delegate { OpenFile(); });
             menu.Items.Add("更改保存文件…", null, delegate { ChangeOutput(); });
-            menu.Items.Add("连接安卓手机…",null,delegate{try{Process.Start(new ProcessStartInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"手机接收.exe")){UseShellExecute=true});}catch(Exception error){Error("手机接收未启动："+error.Message);}});
+            menu.Items.Add("手机连接 / 扫码配对…",null,delegate{ShowPhone();});
             var right = new ToolStripMenuItem("右键显示内容迁移") { Checked = settings.RightClickEnabled, CheckOnClick = true };
             right.CheckedChanged += delegate { settings.RightClickEnabled = right.Checked; floating.Hide(); SaveSettings(); }; menu.Items.Add(right);
             menu.Items.Add("设置 / 开机自启…", null, delegate { ShowSettings(); });
@@ -696,8 +698,10 @@ namespace ContentMover {
             if (!testMode) {
                 EnsureOutput(); SaveSettings();
                 Notify("内容迁移已启动", "选中文字 → 右键 → 蓝色内容迁移按钮。也可按 Ctrl+Alt+M。");
+                BeginInvoke(new Action(delegate{try{if(phone==null)phone=new PairingForm(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ContentMoverMobile"),delegate(string output){Notify("收到手机内容",Path.GetFileName(output));});phone.StartReceiving();}catch(Exception error){Notify("手机接收未启动",error.Message);}}));
             }
         }
+        public void ShowPhone(){try{if(phone==null || phone.IsDisposed)phone=new PairingForm(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ContentMoverMobile"),delegate(string output){Notify("收到手机内容",Path.GetFileName(output));});phone.OpenPairing();}catch(Exception error){Error("手机连接未打开："+error.Message);}}
         protected override void SetVisibleCore(bool value) { base.SetVisibleCore(false); }
         void ResetProbe() {
             probeCancellation.Cancel();probeCancellation=new CancellationTokenSource();selectionTask=null;
@@ -732,6 +736,7 @@ namespace ContentMover {
         protected override void WndProc(ref Message message) {
             if (message.Msg == Native.WM_HOTKEY && !busy) CaptureSelection(Native.GetForegroundWindow(), false);
             if ((uint)message.Msg == SettingsMessage && !busy) BeginInvoke(new Action(ShowSettings));
+            if ((uint)message.Msg == PhoneMessage) BeginInvoke(new Action(ShowPhone));
             base.WndProc(ref message);
         }
         public bool ButtonVisible { get { return floating.Visible; } }
@@ -936,6 +941,7 @@ namespace ContentMover {
             }
         }
         protected override void OnFormClosed(FormClosedEventArgs e) {
+            if(phone!=null)phone.Dispose();
             shuttingDown = true; probeCancellation.Cancel();mouseMonitor.Dispose();
             Native.UnregisterHotKey(Handle, 1);
             expiry.Dispose(); floating.Dispose(); tray.Visible = false; tray.Dispose(); base.OnFormClosed(e);
@@ -953,9 +959,13 @@ namespace ContentMover {
     static class Program {
         public const string FixtureText = "  中文原文\r\n第二行\t空格  \r\nUnicode：😀 café\r\n尾部空格  ";
         [STAThread] static void Main(string[] args) {
+            AppDomain.CurrentDomain.AssemblyResolve+=delegate(object sender,System.ResolveEventArgs e){if(new System.Reflection.AssemblyName(e.Name).Name!="zxing")return null;using(var source=System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("zxing.dll")){if(source==null)return null;var bytes=new byte[source.Length];source.Read(bytes,0,bytes.Length);return System.Reflection.Assembly.Load(bytes);}};
             Native.InitializeDpi();
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             try {
+                if(args.Length>1 && args[0]=="--mobile-test"){MobileTests.Run(args[1]);return;}
+                if(args.Length>1 && args[0]=="--mobile-lifecycle-test"){MobileTests.RunIntegrated(args[1]);return;}
+                if(args.Length>1 && args[0]=="--verify-interop"){MobileTests.VerifyInterop(args[1]);return;}
                 if (args.Length > 0 && args[0] == "--fixture") { Fixture(); return; }
                 if (args.Length > 1 && args[0] == "--selection-probe") {
                     using(var deadline=new System.Threading.Timer(delegate{Environment.Exit(3);},null,2600,Timeout.Infinite)) {
@@ -977,12 +987,13 @@ namespace ContentMover {
                 using (var mutex = new Mutex(true, "Local\\ContentMover.Desktop.v1", out created)) {
                     if (!created) {
                         IntPtr window = Native.FindWindow(null, "内容迁移后台服务");
-                        if (window != IntPtr.Zero) Native.PostMessage(window, Controller.SettingsMessage, IntPtr.Zero, IntPtr.Zero);
+                        if (window != IntPtr.Zero) Native.PostMessage(window, args.Length>0 && args[0]=="--phone" ? Controller.PhoneMessage : Controller.SettingsMessage, IntPtr.Zero, IntPtr.Zero);
                         else MessageBox.Show("内容迁移已经在后台运行，请查看任务栏通知区域。", "内容迁移");
                         return;
                     }
                     using (var controller = new Controller(Controller.LoadSettings(), false)) {
                         if (args.Length > 0 && args[0] == "--settings") controller.BeginInvoke(new Action(controller.ShowSettings));
+                        if(args.Length>0 && args[0]=="--phone")controller.BeginInvoke(new Action(controller.ShowPhone));
                         Application.Run(controller);
                     }
                 }

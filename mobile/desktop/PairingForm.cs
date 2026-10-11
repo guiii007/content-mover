@@ -12,6 +12,10 @@ namespace ContentMover {
         readonly MobileSettings settings;
         readonly string stateDirectory;
         readonly NotifyIcon tray;
+        readonly Action<string> notify;
+        readonly int listenPort;
+        readonly string outputDirectory;
+        bool initialized;
         MobileServer server;
         readonly CheckBox enabled=new CheckBox(),remote=new CheckBox();
         readonly ComboBox addresses=new ComboBox();
@@ -19,7 +23,10 @@ namespace ContentMover {
         readonly Label status=new Label();
         bool loading;
 
-        public PairingForm(string state){
+        public PairingForm(string state):this(state,null){}
+        public PairingForm(string state,Action<string> notification,int port=47831,string output=null){
+            notify=notification;
+            listenPort=port;outputDirectory=output??Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             stateDirectory=state;Directory.CreateDirectory(state);
             string file=Path.Combine(state,"settings.json");
             settings=File.Exists(file)?new JavaScriptSerializer().Deserialize<MobileSettings>(File.ReadAllText(file)):new MobileSettings();
@@ -38,16 +45,20 @@ namespace ContentMover {
             reset.Click+=delegate{if(MessageBox.Show(this,"重新配对后，旧手机需要再次扫码。继续吗？","重新配对",MessageBoxButtons.OKCancel)==DialogResult.OK){settings.Key=Convert.ToBase64String(MobileCrypto.NewKey());RefreshServer();}};Controls.Add(reset);
             var close=new Button{Text="隐藏到托盘",Left=330,Top=576,Width=135,Height=32};close.Click+=delegate{Hide();};Controls.Add(close);
             var help=new Label{Text="远程发送按电脑接收日期归档，手机发送会使用移动流量。",Left=24,Top=620,Width=440,Height=25};Controls.Add(help);
+            if(notify==null){
             tray=new NotifyIcon{Icon=Icon,Text="内容迁移 · 手机接收",Visible=true};
             var menu=new ContextMenuStrip();menu.Items.Add("连接手机 / 配对",null,delegate{Show();Activate();});
             menu.Items.Add("退出手机接收",null,delegate{if(server!=null)server.Dispose();tray.Visible=false;tray.Dispose();Application.Exit();});
             tray.ContextMenuStrip=menu;tray.DoubleClick+=delegate{Show();Activate();};
+            }
             enabled.CheckedChanged+=delegate{settings.Enabled=enabled.Checked;RefreshServer();};
             remote.CheckedChanged+=delegate{settings.Remote=remote.Checked;ReloadAddresses();RefreshServer();};
             addresses.SelectedIndexChanged+=delegate{if(loading)return;RememberAddress();RefreshServer();};
-            Shown+=delegate{ReloadAddresses();RefreshServer();};
+            Shown+=delegate{StartReceiving();};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();}};
         }
+        public void StartReceiving(){if(initialized)return;initialized=true;var handle=Handle;ReloadAddresses();RefreshServer();}
+        public void OpenPairing(){StartReceiving();Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
         void RememberAddress(){if(addresses.SelectedItem==null)return;if(settings.Remote)settings.RemoteAddress=addresses.SelectedItem.ToString();else settings.LocalAddress=addresses.SelectedItem.ToString();}
         void ReloadAddresses(){
             loading=true;
@@ -80,14 +91,14 @@ namespace ContentMover {
             if(!settings.Enabled){status.Text="接收已关闭。\n文件按电脑接收日期保存到桌面，旧文件不会被改写。";DrawCode();return;}
             if(addresses.SelectedItem==null){status.Text=settings.Remote ? "尚未找到 Tailscale 地址。\n请安装并连接 Tailscale，手机登录同一账号。\n连接后点“刷新地址”，再用手机内容迁移扫码。" : "尚未找到局域网地址。请连接 Wi-Fi 或手机热点，再点“刷新地址”。";DrawCode();return;}
             try{
-                server=new MobileServer(Convert.FromBase64String(settings.Key),new MobileStore(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),stateDirectory),settings.Remote);
-                server.Saved+=delegate(string output){try{BeginInvoke(new Action(delegate{status.Text="已保存："+Path.GetFileName(output);tray.BalloonTipTitle="收到手机内容";tray.BalloonTipText=Path.GetFileName(output);tray.ShowBalloonTip(3000);}));}catch{}};
+                server=new MobileServer(Convert.FromBase64String(settings.Key),new MobileStore(outputDirectory,stateDirectory),settings.Remote);
+                server.Saved+=delegate(string output){try{BeginInvoke(new Action(delegate{status.Text="已保存："+Path.GetFileName(output);if(notify!=null)notify(output);else{tray.BalloonTipTitle="收到手机内容";tray.BalloonTipText=Path.GetFileName(output);tray.ShowBalloonTip(3000);}}));}catch{}};
                 // Remote mode listens only on the selected virtual interface, never a public adapter.
-                server.Start(47831,settings.Remote ? IPAddress.Parse(addresses.SelectedItem.ToString()) : IPAddress.Any);
+                server.Start(listenPort,settings.Remote ? IPAddress.Parse(addresses.SelectedItem.ToString()) : IPAddress.Any);
                 status.Text=settings.Remote ? "远程接收已开启，手机内容迁移扫码连接。\n手机用流量、电脑用 Wi-Fi 均可，需两端保持 Tailscale 连接。\n电脑需开机且不休眠，手机接收程序保持运行。" : "局域网接收已开启，手机内容迁移扫码连接。\n两台设备连接同一 Wi-Fi 或手机热点。";
             }catch(Exception error){if(server!=null)server.Dispose();server=null;status.Text="接收未开启："+error.Message;}
             DrawCode();
         }
-        protected override void OnFormClosed(FormClosedEventArgs e){if(server!=null)server.Dispose();if(qr.Image!=null)qr.Image.Dispose();tray.Dispose();base.OnFormClosed(e);}
+        protected override void Dispose(bool disposing){if(disposing){if(server!=null){server.Dispose();server=null;}if(qr.Image!=null){var old=qr.Image;qr.Image=null;old.Dispose();}if(tray!=null)tray.Dispose();}base.Dispose(disposing);}
     }
 }

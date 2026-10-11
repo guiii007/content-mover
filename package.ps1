@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $rootPath = $PSScriptRoot
 $stagePath = Join-Path $rootPath 'dist\内容迁移-Windows'
 New-Item -ItemType Directory -Path $stagePath -Force | Out-Null
-foreach ($name in @('内容迁移.exe','手机接收.exe','启动内容迁移.vbs','README.md','使用说明.md','手机使用说明.md','远程连接说明.md')) {
+foreach ($name in @('内容迁移.exe','启动内容迁移.vbs','README.md','使用说明.md','手机使用说明.md','远程连接说明.md')) {
     $sourceName=if($name -eq '内容迁移.exe'){$DesktopExecutable}elseif($name -eq '手机接收.exe'){$ReceiverExecutable}else{$name}
     Copy-Item -LiteralPath (Join-Path $rootPath $sourceName) -Destination (Join-Path $stagePath $name) -Force
 }
@@ -15,6 +15,7 @@ $oldExtensionPath=[IO.Path]::GetFullPath((Join-Path $stagePath 'browser-extensio
 if(-not $oldExtensionPath.StartsWith([IO.Path]::GetFullPath($stagePath)+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw '暂存目录校验失败'}
 if(Test-Path -LiteralPath $oldExtensionPath){Remove-Item -LiteralPath $oldExtensionPath -Recurse -Force}
 $obsoleteOcr=Join-Path $stagePath 'ocr.ps1';if(Test-Path -LiteralPath $obsoleteOcr){Remove-Item -LiteralPath $obsoleteOcr -Force}
+$obsoleteReceiver=Join-Path $stagePath '手机接收.exe';if(Test-Path -LiteralPath $obsoleteReceiver){Remove-Item -LiteralPath $obsoleteReceiver -Force}
 $zipPath = Join-Path $rootPath 'dist\内容迁移-Windows.zip'
 Compress-Archive -LiteralPath $stagePath -DestinationPath $zipPath -Force
 Write-Output $zipPath

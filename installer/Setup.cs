@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
 [assembly: AssemblyProduct("内容迁移安装程序")]
-[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
 static class InstallCore {
     public const string RegistryPath=@"Software\Microsoft\Windows\CurrentVersion\Uninstall\ContentMover";
     public static readonly string DefaultPath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","ContentMover");
@@ -54,6 +54,8 @@ static class InstallCore {
     }
     public static void Install(string root,bool desktop,bool startup) {
         ValidateRoot(root);StopProduct();var files=Extract(root);
+        string legacyReceiver=Path.Combine(root,"手机接收.exe");
+        if(File.Exists(legacyReceiver) && FileVersionInfo.GetVersionInfo(legacyReceiver).ProductName=="内容迁移")File.Delete(legacyReceiver);
         string app=Path.Combine(root,"内容迁移.exe"),uninstall=Path.Combine(root,"卸载内容迁移.exe");
         File.Copy(Application.ExecutablePath,uninstall,true);files.Add("卸载内容迁移.exe");
         File.WriteAllLines(Path.Combine(root,"installed-files.txt"),files.ToArray(),Encoding.UTF8);
@@ -62,7 +64,7 @@ static class InstallCore {
         if(startup)File.WriteAllText(StartupPath,"CreateObject(\"WScript.Shell\").Run Chr(34) & \""+app.Replace("\"","\"\"")+"\" & Chr(34), 0, False\r\n",Encoding.Unicode);
         else if(File.Exists(StartupPath))File.Delete(StartupPath);
         using(var key=Registry.CurrentUser.CreateSubKey(RegistryPath)) {
-            key.SetValue("DisplayName","内容迁移");key.SetValue("DisplayVersion","1.3.0");key.SetValue("Publisher","guiii007");key.SetValue("InstallLocation",root);
+            key.SetValue("DisplayName","内容迁移");key.SetValue("DisplayVersion","1.3.1");key.SetValue("Publisher","guiii007");key.SetValue("InstallLocation",root);
             key.SetValue("UninstallString","\""+uninstall+"\" --uninstall");key.SetValue("DisplayIcon",app+",0");key.SetValue("NoModify",1);key.SetValue("NoRepair",1);
         }
     }

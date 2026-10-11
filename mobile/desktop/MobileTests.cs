@@ -1,5 +1,24 @@
 using System;using System.IO;using System.Drawing;using System.Net;using System.Text;using System.Web.Script.Serialization;
 namespace ContentMover { static class MobileTests {
+    public static void RunIntegrated(string folder){
+        Directory.CreateDirectory(folder);string state=Path.Combine(folder,"state"),desktop=Path.Combine(folder,"desktop");Directory.CreateDirectory(state);
+        var key=MobileCrypto.NewKey();var json=new JavaScriptSerializer();string config=Path.Combine(state,"settings.json");File.WriteAllText(config,json.Serialize(new MobileSettings{Enabled=true,Key=Convert.ToBase64String(key)}));bool notified=false;
+        var form=new PairingForm(state,delegate{notified=true;},0,desktop);int port;
+        try{
+            form.StartReceiving();Assert(!form.Visible,"后台接收不弹出窗口");
+            var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+            Assert(typeof(PairingForm).GetField("tray",flags).GetValue(form)==null,"整合模式不创建第二个托盘图标");
+            var server=(MobileServer)typeof(PairingForm).GetField("server",flags).GetValue(form);Assert(server!=null,"隐藏状态已启动接收");
+            var listener=(System.Net.Sockets.TcpListener)typeof(MobileServer).GetField("listener",flags).GetValue(server);port=((IPEndPoint)listener.LocalEndpoint).Port;
+            var clip=new MobileClip{Id=Guid.NewGuid().ToString("N"),Text="整合后台接收测试",Title="手机"};
+            using(var client=new WebClient()){client.Headers[HttpRequestHeader.ContentType]="application/json";Assert(MobileCrypto.Open(key,client.UploadString("http://127.0.0.1:"+port+"/v1/clips",MobileCrypto.Seal(key,json.Serialize(clip)))).Contains("\"saved\":true"),"隐藏窗口仍接收并确认");}
+            System.Windows.Forms.Application.DoEvents();Assert(notified,"共用主程序通知");
+            form.OpenPairing();form.Close();Assert(!form.Visible && !form.IsDisposed,"关闭配对窗口只隐藏");
+            var restored=json.Deserialize<MobileSettings>(File.ReadAllText(config));Assert(restored.Enabled && restored.Key==Convert.ToBase64String(key),"保留配对密钥和接收开关");
+        }finally{form.Dispose();}
+        var probe=new System.Net.Sockets.TcpListener(IPAddress.Any,port);try{probe.Start();}finally{probe.Stop();}
+        File.WriteAllText(Path.Combine(folder,"lifecycle-test.txt"),"PASS: one tray; hidden receiver starts; encrypted save and unified notification; pairing close preserves receiver; existing key preserved; dispose releases listener.");
+    }
     static void Assert(bool ok,string name){if(!ok)throw new Exception(name);}
     static void CheckRemotePolicy(){
         foreach(string value in new[]{"100.64.0.1","100.90.80.70","100.127.255.254"}){var ip=IPAddress.Parse(value);Assert(MobileServer.Allowed(ip,true),"远程地址范围");Assert(!MobileServer.Allowed(ip,false),"局域网模式拒绝远程地址");}

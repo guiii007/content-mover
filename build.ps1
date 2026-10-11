@@ -9,6 +9,8 @@ $references = @('System.dll','System.Core.dll','System.Drawing.dll','System.Wind
 $compilerArgs = @('/nologo','/target:winexe','/platform:x64','/optimize+', '/utf8output', ('/out:' + (Join-Path $rootPath '内容迁移.exe')))
 foreach ($referencePath in $references) { $compilerArgs += '/reference:' + $referencePath }
 $compilerArgs += Join-Path $rootPath 'ContentMover.cs'
+$qrAssembly=Join-Path $rootPath 'mobile\toolchain\zxing-net\lib\net40\zxing.dll'
+$compilerArgs += @('/main:ContentMover.Program',('/reference:'+$qrAssembly),('/resource:'+$qrAssembly+',zxing.dll'),(Join-Path $rootPath 'mobile\desktop\PairingForm.cs'),(Join-Path $rootPath 'mobile\desktop\MobileReceiver.cs'),(Join-Path $rootPath 'mobile\desktop\MobileTests.cs'))
 $compilerArgs += '/win32icon:' + (Join-Path $rootPath 'assets\content-mover.ico')
 $compilerArgs = $compilerArgs | ForEach-Object { if ($_ -like '/out:*') { '/out:' + (Join-Path $rootPath $OutputName) } else { $_ } }
 & (Join-Path $frameworkPath 'csc.exe') @compilerArgs

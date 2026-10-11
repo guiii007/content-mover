@@ -8,6 +8,8 @@
 
 双击安装程序，按“下一步 → 安装 → 完成”。默认创建桌面快捷方式，可选择开机自动启动。适用于 Windows 10/11 x64，使用系统自带的 .NET Framework 4.x，无需浏览器扩展。
 
+**[下载安卓内容迁移 APK](https://github.com/guiii007/content-mover/releases/download/v1.3.1/ContentMover-Android.apk)**（安卓 8.0 及以上）。Tailscale 是单独的远程连接工具，不是内容迁移 App。
+
 ![内容迁移图标](assets/content-mover.png)
 
 ## 使用
@@ -32,9 +34,9 @@ Word 尝试记录文档路径、页码和字符位置；浏览器尝试读取网
 
 ## 安卓手机迁移（局域网与远程）
 
-安卓第一版接收选中文字、单张或多张截图，经扫码配对发送到电脑桌面的日期 Markdown 文件。电脑托盘菜单 → **连接安卓手机…**。手机安装 `ContentMover-Android.apk`，然后在选区菜单或分享列表选择“内容迁移”。离线内容先保存在手机，恢复连接后重试。详见 [手机使用说明](手机使用说明.md)。不使用云服务器，原桌面版仍可独立使用。
+电脑版 1.3.1 已整合手机接收，只有一个托盘图标。电脑托盘菜单 → **手机连接 / 扫码配对…**。配对窗口关闭后仍后台接收；退出内容迁移时一起停止。已开启的手机接收随电脑版启动恢复，也可配合电脑版开机自启。手机安装 `ContentMover-Android.apk`，选中文字或分享一张 / 多张截图到内容迁移，扫码后发送到电脑桌面的日期 Markdown。离线内容先保存在手机，恢复连接后重试。详见 [手机使用说明](手机使用说明.md)。
 
-远程连接测试版：[安卓 1.1.0 APK](https://github.com/guiii007/content-mover/releases/download/v1.3.0-beta.3/ContentMover-Android.apk)、[配套 Windows 安装程序](https://github.com/guiii007/content-mover/releases/download/v1.3.0-beta.3/ContentMoverSetup.exe)。两端安装 Tailscale 并登录同一账号后，手机用流量也能发送到电脑桌面。详见 [远程连接说明](远程连接说明.md)。原局域网版本 beta.2 与稳定桌面版 v1.2.12 下载保留。跨网络实测需完成两端登录后进行。
+安卓版 1.1.0 支持局域网与 Tailscale 远程连接，Windows 1.3.1 使用同一个安卓 APK，手机无需重新安装或重新配对。已由用户实测：手机使用运营商流量、电脑连接校园 Wi-Fi，文字与图片成功写入 `.md`。详见 [远程连接说明](远程连接说明.md)。旧版安装包继续保留。
 
 ## 设置与卸载
 
