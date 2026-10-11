@@ -12,8 +12,48 @@ public final class Transfer {
   static boolean vpnConnected(Context context){android.net.ConnectivityManager manager=(android.net.ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);if(manager==null)return false;for(android.net.Network network:manager.getAllNetworks()){android.net.NetworkCapabilities caps=manager.getNetworkCapabilities(network);if(caps!=null && caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN))return true;}return false;}
   static void pair(Context context,String value)throws Exception{Uri uri=Uri.parse(value.trim());if(!"contentmover".equals(uri.getScheme()) || !"pair".equals(uri.getHost()) || !"1".equals(uri.getQueryParameter("v")))throw new IOException("不是内容迁移的配对二维码");String host=uri.getQueryParameter("host"),port=uri.getQueryParameter("port"),key=uri.getQueryParameter("key");String mode=uri.getQueryParameter("mode");boolean remote="remote".equals(mode);if((mode!=null && !remote && !"lan".equals(mode)) || !AddressPolicy.allowed(host,remote) || !"47831".equals(port) || decode(key).length!=32)throw new IOException("配对内容无效");if(PinVault.configured(context)){PinVault.replaceKey(context,decode(key));context.getSharedPreferences("pair",0).edit().putString("host",host).putBoolean("remote",remote).commit();}else context.getSharedPreferences("pair",0).edit().putString("host",host).putString("key",key).putBoolean("remote",remote).commit();}
   static File queue(Context context){File path=new File(context.getFilesDir(),"pending");path.mkdirs();return path;}
-  static File[] pending(Context context){File[] files=queue(context).listFiles((dir,name)->name.endsWith(".json"));if(files==null)return new File[0];java.util.Arrays.sort(files,(a,b)->Long.compare(a.lastModified(),b.lastModified()));return files;}
+  static File[] pending(Context context){File[] files=queue(context).listFiles((dir,name)->name.endsWith(".json"));if(files==null)return new File[0];java.util.Arrays.sort(files,(a,b)->{int order=Long.compare(a.lastModified(),b.lastModified());return order!=0?order:a.getName().compareTo(b.getName());});return files;}
   static byte[] read(InputStream input,int max)throws IOException{ByteArrayOutputStream result=new ByteArrayOutputStream();byte[] bytes=new byte[8192];int count;while((count=input.read(bytes))!=-1){if(result.size()+count>max)throw new IOException("内容过大");result.write(bytes,0,count);}return result.toByteArray();}
-  static String enqueue(Context context,JSONObject clip)throws Exception{byte[] serialized=clip.toString().getBytes(StandardCharsets.UTF_8);if(serialized.length>22000000)throw new IOException("本条内容编码后超过传输上限，请减少图片或勾选缩小后重试。");String id=clip.getString("Id");File temp=new File(queue(context),id+".tmp"),destination=new File(queue(context),id+".json");try(FileOutputStream output=new FileOutputStream(temp)){output.write(serialized);output.getFD().sync();}if(!temp.renameTo(destination))throw new IOException("无法保存待发送内容");return id;}
-  static String sendPending(Context context)throws Exception{if(!sending.compareAndSet(false,true))return "正在发送，请稍候";try{String host=context.getSharedPreferences("pair",0).getString("host","");boolean remote=context.getSharedPreferences("pair",0).getBoolean("remote",false);if(!AddressPolicy.allowed(host,remote))throw new IOException("请先扫码连接电脑");if(remote && !vpnConnected(context))throw new IOException("远程连接尚未开启。请打开 Tailscale，登录与电脑相同的账号并连接，再点重试。");byte[] key=PinVault.key(context);int count=0;for(File file:pending(context)){JSONObject clip;try(FileInputStream input=new FileInputStream(file)){clip=new JSONObject(new String(read(input,22000000),StandardCharsets.UTF_8));}byte[] payload=seal(key,clip.toString()).getBytes(StandardCharsets.UTF_8);HttpURLConnection connection=(HttpURLConnection)new URL("http://"+host+":47831/v1/clips").openConnection();try{connection.setConnectTimeout(remote ? 15000 : 4500);connection.setReadTimeout(remote ? 60000 : 20000);connection.setInstanceFollowRedirects(false);connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Content-Type","application/json");connection.setFixedLengthStreamingMode(payload.length);try(OutputStream output=connection.getOutputStream()){output.write(payload);}if(connection.getResponseCode()!=200)throw new IOException("电脑未接受内容，请检查配对或内容大小");String response;try(InputStream input=connection.getInputStream()){response=new String(read(input,65536),StandardCharsets.UTF_8);}JSONObject ack=new JSONObject(open(key,response));if(!ack.optBoolean("saved") || !clip.getString("Id").equals(ack.getString("id")))throw new IOException("保存确认不匹配");if(!file.delete())throw new IOException("无法更新待发送列表");count++;}finally{connection.disconnect();}}return count>0 ? "已保存 "+count+" 条到电脑桌面" : "没有待发送内容";}finally{sending.set(false);}}
+  static String enqueue(Context context,JSONObject clip)throws Exception{byte[] serialized=clip.toString().getBytes(StandardCharsets.UTF_8);if(serialized.length>22000000)throw new IOException("本条内容编码后超过传输上限，请减少图片或勾选缩小后重试。");String id=clip.getString("Id");File temp=new File(queue(context),id+".tmp"),destination=new File(queue(context),id+".json");try(FileOutputStream output=new FileOutputStream(temp)){output.write(serialized);output.getFD().sync();}if(!temp.renameTo(destination))throw new IOException("无法保存待发送内容");mark(context,id,clip.optString("Title","手机摘录"),"waiting","");return id;}
+  static final DispatchLoop dispatcher=new DispatchLoop();
+  static void mark(Context context,String id,String title,String state,String detail){
+    try{QueueState.write(new File(context.getFilesDir(),"queue-state"),id,title.trim().isEmpty()?"手机摘录":title,state,detail);QueueState.prune(new File(context.getFilesDir(),"queue-state"));}catch(IOException ignored){}
+  }
+  static void dispatch(Context context){final Context app=context.getApplicationContext();dispatcher.request(()->{
+    try{sendPending(app);}catch(Exception e){for(File file:pending(app)){
+      String id=file.getName().replace(".json","");String title="手机摘录";
+      try{for(java.util.Properties row:QueueState.list(new File(app.getFilesDir(),"queue-state")))if(id.equals(row.getProperty("id"))){title=row.getProperty("title",title);break;}}catch(Exception ignored){}
+      mark(app,id,title,"failed",e.getMessage()==null?"连接暂不可用":e.getMessage());
+    }}
+  });}
+  static synchronized String sendPending(Context context)throws Exception {
+    sending.set(true);
+    try{
+      String host=context.getSharedPreferences("pair",0).getString("host","");boolean remote=context.getSharedPreferences("pair",0).getBoolean("remote",false);
+      if(!AddressPolicy.allowed(host,remote))throw new IOException("请先扫码连接电脑");
+      if(remote&&!vpnConnected(context))throw new IOException("请保持 Tailscale 连接");
+      byte[] key=PinVault.key(context);int count=0,failed=0;
+      java.util.HashSet<String> attempted=new java.util.HashSet<>();
+      for(;;){File next=null;for(File file:pending(context))if(!attempted.contains(file.getName())){next=file;break;}if(next==null)break;
+        File file=next;attempted.add(file.getName());String id=file.getName().replace(".json",""),heading="手机摘录";
+        try{
+          JSONObject clip;try(FileInputStream input=new FileInputStream(file)){clip=new JSONObject(new String(read(input,22000000),StandardCharsets.UTF_8));}
+          heading=clip.optString("Title","手机摘录");mark(context,id,heading,"sending","");
+          byte[] payload=seal(key,clip.toString()).getBytes(StandardCharsets.UTF_8);
+          HttpURLConnection connection=(HttpURLConnection)new URL("http://"+host+":47831/v1/clips").openConnection();
+          try{
+            connection.setConnectTimeout(remote?15000:4500);connection.setReadTimeout(remote?60000:20000);connection.setInstanceFollowRedirects(false);connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Content-Type","application/json");connection.setFixedLengthStreamingMode(payload.length);
+            try(OutputStream output=connection.getOutputStream()){output.write(payload);}
+            if(connection.getResponseCode()!=200)throw new IOException("电脑未接受内容，请检查配对或内容大小");
+            String response;try(InputStream input=connection.getInputStream()){response=new String(read(input,65536),StandardCharsets.UTF_8);}
+            JSONObject ack=new JSONObject(open(key,response));
+            if(!ack.optBoolean("saved")||!clip.getString("Id").equals(ack.getString("id")))throw new IOException("保存确认不匹配");
+            if(!file.delete())throw new IOException("无法更新待发送列表");
+            mark(context,id,heading,"saved","");count++;
+          }finally{connection.disconnect();}
+        }catch(Exception e){failed++;mark(context,id,heading,"failed",e instanceof java.net.SocketTimeoutException?"连接超时，请稍后重试":e.getMessage()==null?"发送失败，请重试":e.getMessage());}
+      }
+      return "电脑已保存 "+count+" 条"+(failed>0?"，待重试 "+failed+" 条":"");
+    }finally{sending.set(false);}
+  }
 }

@@ -10,12 +10,11 @@ import javax.crypto.spec.GCMParameterSpec;
 public final class PinVault {
   static final String ALIAS="contentmover.pair.pin.v1";
   static byte[] sessionKey,sessionWrapping;
-  static long expiry;
   static SharedPreferences prefs(Context c){return c.getSharedPreferences("pin",0);}
   static boolean configured(Context c){return prefs(c).contains("payload");}
   static boolean paired(Context c){return configured(c)||!c.getSharedPreferences("pair",0).getString("key","").isEmpty();}
-  static synchronized boolean unlocked(){return sessionKey!=null && android.os.SystemClock.elapsedRealtime()<expiry;}
-  static synchronized void lock(){if(sessionKey!=null)Arrays.fill(sessionKey,(byte)0);if(sessionWrapping!=null)Arrays.fill(sessionWrapping,(byte)0);sessionKey=null;sessionWrapping=null;expiry=0;}
+  static synchronized boolean unlocked(){return sessionKey!=null;}
+  static synchronized void lock(){if(sessionKey!=null)Arrays.fill(sessionKey,(byte)0);if(sessionWrapping!=null)Arrays.fill(sessionWrapping,(byte)0);sessionKey=null;sessionWrapping=null;}
   static javax.crypto.SecretKey deviceKey()throws Exception {
     KeyStore store=KeyStore.getInstance("AndroidKeyStore");store.load(null);
     if(!store.containsAlias(ALIAS)){
@@ -52,7 +51,7 @@ public final class PinVault {
     catch(Exception e){int failures=p.getInt("failures",0)+1;long delay=PinCrypto.delay(failures);p.edit().putInt("failures",failures).putLong("until",System.currentTimeMillis()+delay).commit();throw new Exception(delay>0?"输错次数较多，请稍后重试":"密码不正确");}
     p.edit().putInt("failures",0).putLong("until",0).commit();c.getSharedPreferences("pair",0).edit().remove("key").commit();
   }
-  static void setSession(byte[] key,byte[] wrapping){lock();sessionKey=key.clone();sessionWrapping=wrapping.clone();expiry=android.os.SystemClock.elapsedRealtime()+5*60*1000;}
+  static void setSession(byte[] key,byte[] wrapping){lock();sessionKey=key.clone();sessionWrapping=wrapping.clone();}
   static synchronized byte[] key(Context c)throws Exception {if(!configured(c))throw new Exception("请先设置 4 位密码");if(!unlocked()){lock();throw new Exception("请打开 App 输入 4 位密码，再重试发送");}return sessionKey.clone();}
   static synchronized void reset(Context c){lock();prefs(c).edit().clear().commit();c.getSharedPreferences("pair",0).edit().clear().commit();}
 }
