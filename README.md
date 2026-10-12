@@ -16,6 +16,8 @@
 
 ![内容迁移图标](assets/content-mover.png)
 
+测试版：[安卓 1.2.2 大图发送修复](https://github.com/guiii007/content-mover/releases/download/v1.3.3-beta.1/ContentMover-Android.apk)。文字与大图使用独立通道，大图可等待最长 15 分钟，不自动压缩；失败内容保留。覆盖安装保留配对、密码与待发送条目，电脑无需升级。
+
 ## 界面介绍
 
 ### 电脑端：托盘菜单

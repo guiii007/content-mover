@@ -32,28 +32,22 @@ public final class Transfer {
       String host=context.getSharedPreferences("pair",0).getString("host","");boolean remote=context.getSharedPreferences("pair",0).getBoolean("remote",false);
       if(!AddressPolicy.allowed(host,remote))throw new IOException("请先扫码连接电脑");
       if(remote&&!vpnConnected(context))throw new IOException("请保持 Tailscale 连接");
-      byte[] key=PinVault.key(context);int count=0,failed=0;
-      java.util.HashSet<String> attempted=new java.util.HashSet<>();
-      for(;;){File next=null;for(File file:pending(context))if(!attempted.contains(file.getName())){next=file;break;}if(next==null)break;
-        File file=next;attempted.add(file.getName());String id=file.getName().replace(".json",""),heading="手机摘录";
+      byte[] key=PinVault.key(context);java.util.concurrent.atomic.AtomicInteger count=new java.util.concurrent.atomic.AtomicInteger(),failed=new java.util.concurrent.atomic.AtomicInteger();
+      QueuePump.drain(()->pending(context),file->{
+        String id=file.getName().replace(".json",""),heading="手机摘录";
         try{
           JSONObject clip;try(FileInputStream input=new FileInputStream(file)){clip=new JSONObject(new String(read(input,22000000),StandardCharsets.UTF_8));}
           heading=clip.optString("Title","手机摘录");mark(context,id,heading,"sending","");
           byte[] payload=seal(key,clip.toString()).getBytes(StandardCharsets.UTF_8);
-          HttpURLConnection connection=(HttpURLConnection)new URL("http://"+host+":47831/v1/clips").openConnection();
-          try{
-            connection.setConnectTimeout(remote?15000:4500);connection.setReadTimeout(remote?60000:20000);connection.setInstanceFollowRedirects(false);connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Content-Type","application/json");connection.setFixedLengthStreamingMode(payload.length);
-            try(OutputStream output=connection.getOutputStream()){output.write(payload);}
-            if(connection.getResponseCode()!=200)throw new IOException("电脑未接受内容，请检查配对或内容大小");
-            String response;try(InputStream input=connection.getInputStream()){response=new String(read(input,65536),StandardCharsets.UTF_8);}
+          boolean large=payload.length>QueuePump.SMALL_LIMIT;
+          String response=ClipHttp.post(host,47831,payload,remote?15000:4500,large?600000:(remote?30000:20000),large?900000:45000);
             JSONObject ack=new JSONObject(open(key,response));
             if(!ack.optBoolean("saved")||!clip.getString("Id").equals(ack.getString("id")))throw new IOException("保存确认不匹配");
             if(!file.delete())throw new IOException("无法更新待发送列表");
-            mark(context,id,heading,"saved","");count++;
-          }finally{connection.disconnect();}
-        }catch(Exception e){failed++;mark(context,id,heading,"failed",e instanceof java.net.SocketTimeoutException?"连接超时，请稍后重试":e.getMessage()==null?"发送失败，请重试":e.getMessage());}
-      }
-      return "电脑已保存 "+count+" 条"+(failed>0?"，待重试 "+failed+" 条":"");
+            mark(context,id,heading,"saved","");count.incrementAndGet();
+        }catch(Exception e){failed.incrementAndGet();mark(context,id,heading,"failed",e.getMessage()==null?"发送失败，请重试":e.getMessage());}
+      });
+      return "电脑已保存 "+count.get()+" 条"+(failed.get()>0?"，待重试 "+failed.get()+" 条":"");
     }finally{sending.set(false);}
   }
 }
