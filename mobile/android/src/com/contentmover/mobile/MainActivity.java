@@ -35,20 +35,36 @@ public class MainActivity extends Activity {
     }catch(Exception|OutOfMemoryError e){final boolean retained=queued;runOnUiThread(()->{busy=false;setInputsEnabled(true);send.setText("发送到电脑");if(retained){refreshQueue();Toast.makeText(this,"内容已在列表中，请稍后重试",Toast.LENGTH_LONG).show();}else message("尚未保存，内容仍在当前页面。\n"+e.getMessage());});}}).start();
   }
   void retry(){if(busy)return;requireUnlock(()->{schedule();Transfer.dispatch(this);Toast.makeText(this,"正在后台重试，可以继续编辑",Toast.LENGTH_SHORT).show();refreshQueue();});}
+  String queueFingerprint="";
   void refreshQueue(){
-    if(queueList==null)return;updateStatus();queueList.removeAllViews();
+    if(queueList==null)return;updateStatus();
     try{
       int shown=0;java.util.List<java.util.Properties> rows=QueueState.list(new File(getFilesDir(),"queue-state"));
+      String fingerprint=rows.toString()+Transfer.sending.get()+Transfer.pending(this).length;if(fingerprint.equals(queueFingerprint))return;queueList.removeAllViews();
       for(java.util.Properties row:rows){if(shown++==12)break;
         String state=row.getProperty("state","waiting"),name=row.getProperty("title","手机摘录");
         String caption="saved".equals(state)?"电脑已保存":"sending".equals(state)&&Transfer.sending.get()?"正在迁移…":"failed".equals(state)?"等待重试":"等待迁移";
         TextView item=new TextView(this);item.setText(name+"\n"+caption+("failed".equals(state)?" · "+row.getProperty("detail",""):""));item.setTextSize(14);item.setPadding(dp(12),dp(10),dp(12),dp(10));item.setTextColor("saved".equals(state)?0xff24754c:"failed".equals(state)?0xffad4d25:0xff2159a5);
-        android.graphics.drawable.GradientDrawable background=new android.graphics.drawable.GradientDrawable();background.setColor(0xffffffff);background.setCornerRadius(dp(10));item.setBackground(background);
-        LinearLayout.LayoutParams layout=new LinearLayout.LayoutParams(-1,-2);layout.bottomMargin=dp(6);queueList.addView(item,layout);
+        android.graphics.drawable.GradientDrawable background=new android.graphics.drawable.GradientDrawable();background.setColor(0xffffffff);background.setCornerRadius(dp(10));LinearLayout card=new LinearLayout(this);card.setGravity(Gravity.CENTER_VERTICAL);card.setBackground(background);
+        card.addView(item,new LinearLayout.LayoutParams(0,-2,1));
+        if(!"saved".equals(state)){
+          String id=row.getProperty("id");Button remove=new Button(this);remove.setText("删除");remove.setTextSize(13);remove.setTextColor(0xffad4d25);remove.setContentDescription("删除待发送内容："+name);
+          LinearLayout.LayoutParams action=new LinearLayout.LayoutParams(dp(64),dp(48));action.rightMargin=dp(6);card.addView(remove,action);
+          remove.setOnClickListener(v->confirmDelete(id,name));
+        }
+        LinearLayout.LayoutParams layout=new LinearLayout.LayoutParams(-1,-2);layout.bottomMargin=dp(6);queueList.addView(card,layout);
       }
       if(rows.isEmpty())label(queueList,Transfer.pending(this).length>0?"已有待发送内容，连接后点重试":"发送后会显示在这里；可继续编辑下一条。");
       else if(rows.size()>12)label(queueList,"显示最近 12 条；其余待发送内容仍保留在手机。").setTextSize(12);
-    }catch(Exception e){label(queueList,"列表暂时无法读取，待发送内容仍保留。");}
+      queueFingerprint=fingerprint;
+    }catch(Exception e){queueFingerprint="";queueList.removeAllViews();label(queueList,"列表暂时无法读取，待发送内容仍保留。");}
+  }
+  void confirmDelete(String id,String name){
+    new AlertDialog.Builder(this).setTitle("删除这条迁移内容？").setMessage(name+"\n将删除手机中的待发送文字和图片，并停止重试。如果电脑已经收到，不会删除电脑文件。")
+      .setNegativeButton("取消",null).setPositiveButton("删除",(dialog,which)->{
+        new Thread(()->{try{Transfer.delete(this,id);runOnUiThread(()->{refreshQueue();Toast.makeText(this,"已删除，不再重试",Toast.LENGTH_SHORT).show();});}
+          catch(Exception e){runOnUiThread(()->message(e.getMessage()));}},"content-mover-delete").start();
+      }).show();
   }
   void setInputsEnabled(boolean enabled){send.setEnabled(enabled);title.setEnabled(enabled);text.setEnabled(enabled);note.setEnabled(enabled);source.setEnabled(enabled);shrink.setEnabled(enabled);}
   void showImages(){

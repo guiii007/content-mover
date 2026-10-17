@@ -15,9 +15,12 @@ public final class Transfer {
   static File[] pending(Context context){File[] files=queue(context).listFiles((dir,name)->name.endsWith(".json"));if(files==null)return new File[0];java.util.Arrays.sort(files,(a,b)->{int order=Long.compare(a.lastModified(),b.lastModified());return order!=0?order:a.getName().compareTo(b.getName());});return files;}
   static byte[] read(InputStream input,int max)throws IOException{ByteArrayOutputStream result=new ByteArrayOutputStream();byte[] bytes=new byte[8192];int count;while((count=input.read(bytes))!=-1){if(result.size()+count>max)throw new IOException("内容过大");result.write(bytes,0,count);}return result.toByteArray();}
   static String enqueue(Context context,JSONObject clip)throws Exception{byte[] serialized=clip.toString().getBytes(StandardCharsets.UTF_8);if(serialized.length>22000000)throw new IOException("本条内容编码后超过传输上限，请减少图片或勾选缩小后重试。");String id=clip.getString("Id");File temp=new File(queue(context),id+".tmp"),destination=new File(queue(context),id+".json");try(FileOutputStream output=new FileOutputStream(temp)){output.write(serialized);output.getFD().sync();}if(!temp.renameTo(destination))throw new IOException("无法保存待发送内容");mark(context,id,clip.optString("Title","手机摘录"),"waiting","");return id;}
+  static final java.util.concurrent.ConcurrentHashMap<String,QueueItems> stores=new java.util.concurrent.ConcurrentHashMap<>();
+  static QueueItems items(Context context){File base=context.getFilesDir();return stores.computeIfAbsent(base.getAbsolutePath(),unused->new QueueItems(queue(context),new File(base,"queue-state")));}
+  static void delete(Context context,String id)throws IOException {items(context).delete(id);}
   static final DispatchLoop dispatcher=new DispatchLoop();
   static void mark(Context context,String id,String title,String state,String detail){
-    try{QueueState.write(new File(context.getFilesDir(),"queue-state"),id,title.trim().isEmpty()?"手机摘录":title,state,detail);QueueState.prune(new File(context.getFilesDir(),"queue-state"));}catch(IOException ignored){}
+    try{items(context).mark(id,title.trim().isEmpty()?"手机摘录":title,state,detail);}catch(IOException ignored){}
   }
   static void dispatch(Context context){final Context app=context.getApplicationContext();dispatcher.request(()->{
     try{sendPending(app);}catch(Exception e){for(File file:pending(app)){
@@ -35,17 +38,17 @@ public final class Transfer {
       byte[] key=PinVault.key(context);java.util.concurrent.atomic.AtomicInteger count=new java.util.concurrent.atomic.AtomicInteger(),failed=new java.util.concurrent.atomic.AtomicInteger();
       QueuePump.drain(()->pending(context),file->{
         String id=file.getName().replace(".json",""),heading="手机摘录";
+        ClipHttp.Cancellation token;try{token=items(context).begin(id);}catch(IOException e){return;}if(token==null)return;
         try{
           JSONObject clip;try(FileInputStream input=new FileInputStream(file)){clip=new JSONObject(new String(read(input,22000000),StandardCharsets.UTF_8));}
           heading=clip.optString("Title","手机摘录");mark(context,id,heading,"sending","");
           byte[] payload=seal(key,clip.toString()).getBytes(StandardCharsets.UTF_8);
           boolean large=payload.length>QueuePump.SMALL_LIMIT;
-          String response=ClipHttp.post(host,47831,payload,remote?15000:4500,large?600000:(remote?30000:20000),large?900000:45000);
+          String response=ClipHttp.post(host,47831,payload,remote?15000:4500,large?600000:(remote?30000:20000),large?900000:45000,token);
             JSONObject ack=new JSONObject(open(key,response));
             if(!ack.optBoolean("saved")||!clip.getString("Id").equals(ack.getString("id")))throw new IOException("保存确认不匹配");
-            if(!file.delete())throw new IOException("无法更新待发送列表");
-            mark(context,id,heading,"saved","");count.incrementAndGet();
-        }catch(Exception e){failed.incrementAndGet();mark(context,id,heading,"failed",e.getMessage()==null?"发送失败，请重试":e.getMessage());}
+            if(items(context).saved(id,heading))count.incrementAndGet();
+        }catch(Exception e){failed.incrementAndGet();mark(context,id,heading,"failed",e.getMessage()==null?"发送失败，请重试":e.getMessage());}finally{items(context).finish(id,token);}
       });
       return "电脑已保存 "+count.get()+" 条"+(failed.get()>0?"，待重试 "+failed.get()+" 条":"");
     }finally{sending.set(false);}

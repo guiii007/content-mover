@@ -7,9 +7,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** A bounded HTTP exchange: closing the socket also interrupts a stalled upload. */
 public final class ClipHttp {
+  public static final class Cancellation {
+    private boolean cancelled;private Socket active;
+    synchronized void attach(Socket socket)throws IOException {if(cancelled){socket.close();throw new IOException("已取消迁移");}active=socket;}
+    synchronized void detach(Socket socket){if(active==socket)active=null;}
+    public synchronized void cancel(){cancelled=true;if(active!=null)try{active.close();}catch(IOException ignored){}}
+  }
   private static final ScheduledExecutorService deadlines=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"content-mover-deadline");t.setDaemon(true);return t;});
   public static String post(String host,int port,byte[] payload,int connectMs,int readMs,int totalMs)throws IOException {
+    return post(host,port,payload,connectMs,readMs,totalMs,new Cancellation());
+  }
+  public static String post(String host,int port,byte[] payload,int connectMs,int readMs,int totalMs,Cancellation cancellation)throws IOException {
     Socket socket=new Socket();AtomicBoolean expired=new AtomicBoolean();String phase="连接电脑";
+    cancellation.attach(socket);
     ScheduledFuture<?> timer=deadlines.schedule(()->{expired.set(true);try{socket.close();}catch(IOException ignored){}},totalMs,TimeUnit.MILLISECONDS);
     try{
       socket.connect(new InetSocketAddress(host,port),connectMs);socket.setSoTimeout(readMs);
@@ -26,6 +36,6 @@ public final class ClipHttp {
       byte[] response=new byte[length];int offset=0;while(offset<length){int n=input.read(response,offset,length-offset);if(n<0)throw new EOFException("电脑保存确认不完整，内容仍保留在手机");offset+=n;}
       return new String(response,StandardCharsets.UTF_8);
     }catch(IOException e){if(expired.get()||e instanceof SocketTimeoutException)throw new IOException(phase+"超时，内容已保留，其他条目可继续发送",e);throw e;}
-    finally{timer.cancel(false);socket.close();}
+    finally{timer.cancel(false);cancellation.detach(socket);socket.close();}
   }
 }

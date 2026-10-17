@@ -4,6 +4,10 @@ import java.util.*;
 
 /** Small durable receipts; image payloads are never read by the queue UI. */
 public final class QueueState {
+  public static synchronized void remove(File folder,String id)throws IOException {
+    if(!id.matches("[a-zA-Z0-9-]+"))throw new IOException("Invalid queue ID");
+    for(String suffix:new String[]{".properties",".tmp"}){File file=new File(folder,id+suffix);if(file.exists()&&!file.delete())throw new IOException("无法删除迁移记录，请重试");}
+  }
   public static synchronized void write(File folder,String id,String title,String state,String detail)throws IOException {
     if(!id.matches("[a-zA-Z0-9-]+"))throw new IOException("Invalid queue ID");
     folder.mkdirs();File dest=new File(folder,id+".properties"),temp=new File(folder,id+".tmp");Properties p=new Properties();
